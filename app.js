@@ -2,7 +2,7 @@ const express = require('express');
 const app = express();
 const dotenv = require('dotenv');
 const mongoose = require('mongoose');
-require('./services/database.js'); // Importa y ejecuta la conexión desde la clase Database
+require('./services/database'); // Importa y ejecuta la conexión desde la clase Database
 
 // Cargar variables de entorno
 dotenv.config();
