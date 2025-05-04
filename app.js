@@ -1,29 +1,57 @@
 const express = require('express');
-const app = express();
 const dotenv = require('dotenv');
 const mongoose = require('mongoose');
-require('./services/database'); // Importa y ejecuta la conexión desde la clase Database
+const Usuario = require('./models/usuario');
+require('./services/database');
 
-// Cargar variables de entorno
+const app = express();
 dotenv.config();
 app.use(express.json());
 
-// Modelos
-const Usuario = require('./models/usuario'); // Aquí estás usando el modelo único que agrupa Usuario, Envío y Producto
+// Crear usuario con asignación de créditos según plan
+app.post('/crear-usuario', async (req, res) => {
+  try {
+    const { nombre, plan } = req.body;
+    let creditos, costoPorEnvio;
 
-//Verificar crédito disponible del usuario (GET)
-app.get('/credito/:id', async (req, res) => {
-  const usuario = await Usuario.findById(req.params.id);
-  if (!usuario) return res.status(404).json({ mensaje: 'Usuario no encontrado' });
+    if (plan === 1) {
+      creditos = 30;
+      costoPorEnvio = 135 / 30;
+    } else if (plan === 2) {
+      creditos = 40;
+      costoPorEnvio = 160 / 40;
+    } else if (plan === 3) {
+      creditos = 60;
+      costoPorEnvio = 180 / 60;
+    } else {
+      return res.status(400).json({ mensaje: 'Plan inválido. Usa 1, 2 o 3.' });
+    }
 
-  res.json({
-    nombre: usuario.nombre,
-    creditosDisponibles: usuario.creditos,
-    tipoPlan: usuario.plan
-  });
+    const usuario = new Usuario({ nombre, creditos, costoPorEnvio });
+    await usuario.save();
+    res.status(201).json({ mensaje: 'Usuario creado correctamente', usuario });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al crear usuario', detalles: error.message });
+  }
 });
 
-//Agregar envío y producto (POST)
+// Ver créditos de un usuario
+app.get('/credito/:id', async (req, res) => {
+  try {
+    const usuario = await Usuario.findById(req.params.id);
+    if (!usuario) return res.status(404).json({ mensaje: 'Usuario no encontrado' });
+
+    res.json({
+      nombre: usuario.nombre,
+      creditosDisponibles: usuario.creditos,
+      costoPorEnvio: usuario.costoPorEnvio
+    });
+  } catch (error) {
+    res.status(500).json({ mensaje: 'Error al obtener créditos', detalles: error.message });
+  }
+});
+
+// Registrar un nuevo envío
 app.post('/envio/:id', async (req, res) => {
   try {
     const usuario = await Usuario.findById(req.params.id);
@@ -34,58 +62,51 @@ app.post('/envio/:id', async (req, res) => {
       descripcion, peso, bultos, fecha_entrega
     } = req.body;
 
-    // Calcular costo por peso
-    const pesoExtra = Math.ceil(peso / 3);
-    let costoEnvio = usuario.costoPorEnvio * pesoExtra;
+    const envioData = { nombre, direccion, telefono, referencia, observacion };
+    const productoData = { descripcion, peso, bultos, fecha_entrega };
 
-    if (usuario.creditos <= 0) return res.status(400).json({ mensaje: 'Créditos insuficientes' });
-
-    // Restar crédito
-    usuario.creditos -= pesoExtra;
-
-    // Agregar envío y producto
-    usuario.envios.push({
-      nombre, direccion, telefono, referencia, observacion,
-      producto: { descripcion, peso, bultos, fecha_entrega }
-    });
+    // Usamos método encapsulado
+    usuario.registrarEnvio(envioData, productoData);
 
     await usuario.save();
-
-    res.json({ mensaje: 'Envío registrado correctamente', costoEnvio });
+    res.json({ mensaje: 'Envío registrado correctamente' });
   } catch (error) {
-    res.status(500).json({ error: 'Error al registrar el envío' });
+    res.status(400).json({ mensaje: 'Error al registrar el envío', detalles: error.message });
   }
 });
 
-//Ver todos los envíos del usuario (GET)
+// Consultar todos los envíos de un usuario
 app.get('/envios/:id', async (req, res) => {
-  const usuario = await Usuario.findById(req.params.id);
-  if (!usuario) return res.status(404).json({ mensaje: 'Usuario no encontrado' });
+  try {
+    const usuario = await Usuario.findById(req.params.id);
+    if (!usuario) return res.status(404).json({ mensaje: 'Usuario no encontrado' });
 
-  res.json({ envios: usuario.envios });
+    res.json({ envios: usuario.envios });
+  } catch (error) {
+    res.status(500).json({ mensaje: 'Error al obtener envíos', detalles: error.message });
+  }
 });
 
-//Eliminar envío y devolver crédito (DELETE)
+// Eliminar envío y devolver créditos
 app.delete('/envio/:userId/:envioId', async (req, res) => {
-  const { userId, envioId } = req.params;
-  const usuario = await Usuario.findById(userId);
-  if (!usuario) return res.status(404).json({ mensaje: 'Usuario no encontrado' });
+  try {
+    const { userId, envioId } = req.params;
+    const usuario = await Usuario.findById(userId);
+    if (!usuario) return res.status(404).json({ mensaje: 'Usuario no encontrado' });
 
-  const envio = usuario.envios.id(envioId);
-  if (!envio) return res.status(404).json({ mensaje: 'Envío no encontrado' });
+    // Usamos método encapsulado
+    usuario.eliminarEnvio(envioId);
 
-  const peso = envio.producto.peso;
-  const pesoExtra = Math.ceil(peso / 3);
-  usuario.creditos += pesoExtra;
-
-  envio.remove();
-  await usuario.save();
-
-  res.json({ mensaje: 'Envío eliminado y crédito devuelto' });
+    await usuario.save();
+    res.json({ mensaje: 'Envío eliminado y créditos devueltos' });
+  } catch (error) {
+    res.status(400).json({ mensaje: 'Error al eliminar envío', detalles: error.message });
+  }
 });
 
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Servidor corriendo`);
+  console.log(`Servidor corriendo en el puerto ${PORT}`);
 });
+
